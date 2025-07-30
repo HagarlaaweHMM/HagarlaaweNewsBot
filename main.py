@@ -22,9 +22,8 @@ if not OPENAI_API_KEY:
 openai.api_key = OPENAI_API_KEY # Initialize the OpenAI client
 
 # --- Persistent Storage Configuration ---
-# This path should point to a directory on your Render Persistent Disk.
-# A common mount point is /var/data
-PERSISTENT_STORAGE_PATH = "/var/data"
+# THIS HAS BEEN UPDATED TO MATCH YOUR RENDER DISK MOUNT PATH
+PERSISTENT_STORAGE_PATH = "/bot-data"
 LAST_LINK_FILE = os.path.join(PERSISTENT_STORAGE_PATH, "last_posted_link.txt")
 
 # --- Global Variables ---
@@ -266,6 +265,7 @@ if __name__ == "__main__":
     # Run the main loop
     while True:
         try:
+            # Use asyncio.run for the main async function call
             asyncio.run(fetch_and_post_headlines())
         except Exception as e:
             print(f"An error occurred in the main fetch loop: {e}")

@@ -8,7 +8,7 @@ import pytz
 import requests
 from telegram import Bot
 import openai
-import httpx # ADD THIS IMPORT: Import the httpx library
+import httpx # Import the httpx library
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
@@ -21,15 +21,13 @@ if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable not set. Please set it in Render Dashboard.")
 
 # --- EXPLICITLY INITIALIZE THE OPENAI CLIENT HERE ---
-# We're passing an httpx.Client with no proxy settings to ensure no implicit proxy discovery conflicts.
 try:
     openai_client = openai.OpenAI(
         api_key=OPENAI_API_KEY,
-        http_client=httpx.Client(proxies={}) # Explicitly set an httpx client with no proxies
+        http_client=httpx.Client(proxies={})
     )
     print("OpenAI client initialized with explicit httpx.Client.")
 except Exception as e:
-    # Fallback to default client if explicit client fails for some unexpected reason
     print(f"Error initializing explicit OpenAI client: {e}. Falling back to default client.")
     openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
@@ -41,20 +39,9 @@ LAST_LINK_FILE = os.path.join(PERSISTENT_STORAGE_PATH, "last_posted_link.txt")
 # --- Global Variables ---
 last_posted_link = None
 
-# --- Keyword Filtering ---
-KEYWORDS = [
-    "cpi", "inflation", "gdp", "jobs report", "non-farm payrolls", "nfp",
-    "interest rate", "fed", "central bank", "ecb", "boe", "boj", "fomc",
-    "rate hike", "recession", "unemployment", "manufacturing pmi",
-    "services pmi", "trade balance", "retail sales", "consumer confidence",
-    "economic outlook", "fiscal policy", "monetary policy", "yields",
-    "jpmorgan", "goldman sachs", "bank of america", "citi", "wells fargo",
-    "hsbc", "barclays", "deutsche bank", "ubs", "federal reserve",
-    "european central bank", "bank of england", "bank of japan", "imf",
-    "world bank", "moody's", "s&p", "fitch", "bank of international settlements",
-    "usd", "eur", "jpy", "gbp", "chf", "cad", "aud", "nzd", "yen", "pound",
-    "euro", "dollar", "currency", "forex", "fx", "greenback",
-]
+# --- Keyword Filtering (NOW EMPTY - ALL HEADLINES WILL BE PROCESSED) ---
+# The filtering logic below will now ensure all headlines are processed.
+KEYWORDS = [] 
 
 # --- List of Somali prefixes to remove from translation ---
 SOMALI_PREFIXES_TO_REMOVE = [
@@ -63,7 +50,11 @@ SOMALI_PREFIXES_TO_REMOVE = [
 ]
 
 def contains_keywords(text, keywords):
-    """Checks if the text contains any of the specified keywords (case-insensitive)."""
+    """Checks if the text contains any of the specified keywords (case-insensitive).
+    This function is effectively bypassed below now that keywords are removed.
+    """
+    if not keywords: # If keywords list is empty, always return True
+        return True
     text_lower = text.lower()
     for keyword in keywords:
         if keyword.lower() in text_lower:
@@ -110,7 +101,6 @@ async def translate_text_with_gpt(text: str, target_language: str = "Somali") ->
     Translates the given English text to the target language using OpenAI GPT.
     """
     try:
-        # Use the explicitly created openai_client
         response = await openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -160,7 +150,7 @@ async def fetch_and_post_headlines():
 
     print(f"Found {len(new_entries_to_process)} new headlines. Applying filters and translating...")
 
-    filtered_headlines_count = 0
+    headlines_posted_count = 0
     for entry in new_entries_to_process:
         english_headline_raw = entry.title
         link = entry.link if hasattr(entry, 'link') else None
@@ -168,12 +158,18 @@ async def fetch_and_post_headlines():
         cleaned_english_headline = english_headline_raw.replace("FinancialJuice:", "").replace("Abuurjuice:", "").strip()
         cleaned_english_headline = remove_flag_emojis(cleaned_english_headline)
 
+        # --- KEYWORDS FILTERING REMOVED ---
+        # The 'if not contains_keywords' block has been removed,
+        # so all headlines will proceed to translation attempt.
+        # However, to maintain the spirit, we can still use the contains_keywords
+        # function which will now always return True if KEYWORDS list is empty.
         if not contains_keywords(cleaned_english_headline, KEYWORDS):
+            # This block will technically not be hit if KEYWORDS is empty
             print(f"Skipping (no keywords): '{cleaned_english_headline}'")
             continue
 
-        print(f"Processing (contains keywords): '{cleaned_english_headline}'")
-        filtered_headlines_count += 1
+        print(f"Processing: '{cleaned_english_headline}'") # Changed log to reflect no keyword check
+        headlines_posted_count += 1 # Renamed from filtered_headlines_count
 
         try:
             somali_headline = await translate_text_with_gpt(cleaned_english_headline, "Somali")
@@ -189,8 +185,9 @@ async def fetch_and_post_headlines():
                 f"{somali_headline}"
             )
             
-            if link:
-                message_to_send += f"\n\n[Read more]({link})"
+            # --- "Read more" link REMOVED ---
+            # if link:
+            #     message_to_send += f"\n\n[Read more]({link})"
 
             await bot.send_message(
                 chat_id=TELEGRAM_CHANNEL_ID,
@@ -213,8 +210,9 @@ async def fetch_and_post_headlines():
                     f"**DEGDEG 🔴 (Translation Error)**\n\n"
                     f"{cleaned_english_headline}"
                 )
-                if link:
-                    fallback_message += f"\n\n[Read more]({link})"
+                # --- "Read more" link REMOVED from fallback too ---
+                # if link:
+                #     fallback_message += f"\n\n[Read more]({link})"
 
                 await bot.send_message(
                     chat_id=TELEGRAM_CHANNEL_ID,
@@ -229,8 +227,8 @@ async def fetch_and_post_headlines():
             except Exception as inner_e:
                 print(f"Failed to post even original English headline '{cleaned_english_headline}': {inner_e}")
 
-    if filtered_headlines_count == 0 and len(new_entries_to_process) > 0:
-        print("No new headlines matched the keyword filter.")
+    if headlines_posted_count == 0 and len(new_entries_to_process) > 0:
+        print("No new headlines were processed (this shouldn't happen if keyword filter is removed).")
 
 
 # --- Main Execution Loop ---

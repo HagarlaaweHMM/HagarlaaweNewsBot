@@ -2,5 +2,6 @@ python-telegram-bot==21.3
 requests==2.32.3
 pytz==2024.1
 feedparser==6.0.10
-openai==1.17.1  # <-- CHANGE THIS LINE TO SPECIFY THE VERSION
-# aiohttp==3.9.5 # This line should NOT be in your main.py if you use this code
+openai==1.17.1
+httpx==0.27.0  # <-- ADD THIS LINE
+# aiohttp==3.9.5

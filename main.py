@@ -11,9 +11,9 @@ import openai
 import httpx # Import the httpx library
 
 # --- Configuration ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN_HERE")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@HagarlaaweMarkets")
-FINANCIAL_JUICE_RSS_FEED_URL = os.getenv("FINANCIAL_JUICE_RSS_FEED_URL", "YOUR_FINANCIAL_JUICE_RSS_FEED_URL_HERE")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+FINANCIAL_JUICE_RSS_FEED_URL = os.getenv("FINANCIAL_JUICE_RSS_FEED_URL")
 
 # --- OpenAI API Key Configuration ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -40,7 +40,6 @@ LAST_LINK_FILE = os.path.join(PERSISTENT_STORAGE_PATH, "last_posted_link.txt")
 last_posted_link = None
 
 # --- Keyword Filtering (NOW EMPTY - ALL HEADLINES WILL BE PROCESSED) ---
-# The filtering logic below will now ensure all headlines are processed.
 KEYWORDS = [] 
 
 # --- List of Somali prefixes to remove from translation ---
@@ -50,10 +49,7 @@ SOMALI_PREFIXES_TO_REMOVE = [
 ]
 
 def contains_keywords(text, keywords):
-    """Checks if the text contains any of the specified keywords (case-insensitive).
-    This function is effectively bypassed below now that keywords are removed.
-    """
-    if not keywords: # If keywords list is empty, always return True
+    if not keywords:
         return True
     text_lower = text.lower()
     for keyword in keywords:
@@ -62,17 +58,12 @@ def contains_keywords(text, keywords):
     return False
 
 def remove_flag_emojis(text):
-    """
-    Removes common flag emojis (regional indicator symbol pairs)
-    and their associated colons/whitespace from the text.
-    """
     flag_pattern = r'[\U0001F1E6-\U0001F1FF]{2}:?\s*'
     cleaned_text = re.sub(flag_pattern, '', text, flags=re.UNICODE)
     return cleaned_text.strip()
 
 # --- Functions for Persistence ---
 def load_last_posted_link():
-    """Loads the last posted link from the persistent file."""
     if os.path.exists(LAST_LINK_FILE):
         try:
             with open(LAST_LINK_FILE, 'r') as f:
@@ -86,7 +77,6 @@ def load_last_posted_link():
     return None
 
 def save_last_posted_link(link):
-    """Saves the last posted link to the persistent file."""
     try:
         os.makedirs(PERSISTENT_STORAGE_PATH, exist_ok=True)
         with open(LAST_LINK_FILE, 'w') as f:
@@ -97,9 +87,6 @@ def save_last_posted_link(link):
 
 # --- OpenAI Translation Function ---
 async def translate_text_with_gpt(text: str, target_language: str = "Somali") -> str:
-    """
-    Translates the given English text to the target language using OpenAI GPT.
-    """
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -116,16 +103,13 @@ async def translate_text_with_gpt(text: str, target_language: str = "Somali") ->
         print(f"OpenAI API Error during translation: {e}")
         return f"Translation service currently unavailable due to API error. Original text: {text}"
     except Exception as e:
-        print(f"An unexpected error occurred during translation: {e}")
+        # We need to print the specific error to finally figure this out.
+        print(f"An unexpected error occurred during translation: {type(e).__name__} - {e}")
         return f"Translation failed due to an internal error. Original text: {text}"
 
 # --- Main Bot Logic Functions ---
 
 async def fetch_and_post_headlines():
-    """
-    Fetches new headlines from the RSS feed, filters them by keywords,
-    translates them to Somali via GPT API, and posts them to the Telegram channel.
-    """
     global last_posted_link
 
     current_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
@@ -158,18 +142,12 @@ async def fetch_and_post_headlines():
         cleaned_english_headline = english_headline_raw.replace("FinancialJuice:", "").replace("Abuurjuice:", "").strip()
         cleaned_english_headline = remove_flag_emojis(cleaned_english_headline)
 
-        # --- KEYWORDS FILTERING REMOVED ---
-        # The 'if not contains_keywords' block has been removed,
-        # so all headlines will proceed to translation attempt.
-        # However, to maintain the spirit, we can still use the contains_keywords
-        # function which will now always return True if KEYWORDS list is empty.
         if not contains_keywords(cleaned_english_headline, KEYWORDS):
-            # This block will technically not be hit if KEYWORDS is empty
             print(f"Skipping (no keywords): '{cleaned_english_headline}'")
             continue
 
-        print(f"Processing: '{cleaned_english_headline}'") # Changed log to reflect no keyword check
-        headlines_posted_count += 1 # Renamed from filtered_headlines_count
+        print(f"Processing: '{cleaned_english_headline}'")
+        headlines_posted_count += 1
 
         try:
             somali_headline = await translate_text_with_gpt(cleaned_english_headline, "Somali")
@@ -185,10 +163,6 @@ async def fetch_and_post_headlines():
                 f"{somali_headline}"
             )
             
-            # --- "Read more" link REMOVED ---
-            # if link:
-            #     message_to_send += f"\n\n[Read more]({link})"
-
             await bot.send_message(
                 chat_id=TELEGRAM_CHANNEL_ID,
                 text=message_to_send,
@@ -210,9 +184,8 @@ async def fetch_and_post_headlines():
                     f"**DEGDEG 🔴 (Translation Error)**\n\n"
                     f"{cleaned_english_headline}"
                 )
-                # --- "Read more" link REMOVED from fallback too ---
-                # if link:
-                #     fallback_message += f"\n\n[Read more]({link})"
+                if link:
+                    fallback_message += f"\n\n[Read more]({link})"
 
                 await bot.send_message(
                     chat_id=TELEGRAM_CHANNEL_ID,
@@ -248,3 +221,4 @@ if __name__ == "__main__":
         current_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         print(f"[{current_time_str}] Sleeping for 1 minute before next check...")
         time.sleep(60)
+

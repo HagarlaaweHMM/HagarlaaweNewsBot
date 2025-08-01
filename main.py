@@ -1,76 +1,66 @@
-import os
 import feedparser
-import asyncio
-import logging
-from datetime import datetime
-from pytz import timezone
 import openai
+import logging
+import asyncio
+import html
+import pytz
+from datetime import datetime
 from telegram import Bot
+from telegram.constants import ParseMode
+from telegram.error import TelegramError
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Replace with your actual keys and IDs
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TELEGRAM_CHANNEL_ID = "@YourChannelName"
+OPENAI_API_KEY = "YOUR_OPENAI_API_KEY"
+RSS_FEED_URL = "https://example.com/rss"  # Replace with actual RSS URL
 
-# Environment Variables
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHANNEL = os.getenv("TELEGRAM_CHANNEL_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-RSS_FEED_URL = "https://www.bloomberg.com/feed/podcast/etf-iq.xml"  # change if needed
-
-# Clients
-bot = Bot(token=TELEGRAM_TOKEN)
+# Setup
 openai.api_key = OPENAI_API_KEY
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+last_published = None
+CHECK_INTERVAL = 180  # seconds
 
-# Timezone
-tz = timezone("Africa/Mogadishu")
+logging.basicConfig(level=logging.INFO)
 
-# Track already posted entries
-posted_links = set()
+def translate_to_somali(text):
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": f"Tarjum qoraalkan af Soomaali: {text}"}],
+        max_tokens=300
+    )
+    return response.choices[0].message.content.strip()
 
-async def translate_to_somali(text):
-    try:
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You translate financial and economic news into Somali in a natural, professional tone."},
-                {"role": "user", "content": f"Translate this into Somali:\n\n{text}"}
-            ]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"Translation error: {e}")
-        return None
+async def check_feed():
+    global last_published
+    logging.info("Checking RSS feed...")
 
-async def check_rss_and_post():
-    logger.info("Checking RSS feed...")
     feed = feedparser.parse(RSS_FEED_URL)
+    for entry in reversed(feed.entries):
+        entry_time = datetime(*entry.published_parsed[:6], tzinfo=pytz.utc)
+        if last_published is None or entry_time > last_published:
+            title = html.unescape(entry.title)
+            link = entry.link
+            summary = html.unescape(entry.summary)
 
-    for entry in feed.entries[:5]:  # limit to 5 latest
-        if entry.link in posted_links:
-            continue
+            translated_summary = translate_to_somali(summary)
 
-        title = entry.title
-        summary = entry.get("summary", "")
-        link = entry.link
-        published = entry.get("published", "")
-
-        content_to_translate = f"{title}\n\n{summary}\n\nLink: {link}"
-        translated = await translate_to_somali(content_to_translate)
-
-        if translated:
-            timestamp = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
-            message = f"📰 {timestamp}\n\n{translated}"
+            message = f"📰 <b>{html.escape(title)}</b>\n\n{translated_summary}\n\n<a href=\"{link}\">Akhriso Warkan</a>"
             try:
-                await bot.send_message(chat_id=TELEGRAM_CHANNEL, text=message)
-                logger.info(f"Posted: {title}")
-                posted_links.add(link)
-            except Exception as e:
-                logger.error(f"Telegram post error: {e}")
+                await bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
+                logging.info("Posted to Telegram.")
+            except TelegramError as e:
+                logging.error(f"Telegram error: {e}")
 
-async def run_loop():
+            last_published = entry_time
+
+async def main():
     while True:
-        await check_rss_and_post()
-        await asyncio.sleep(900)  # 15 minutes
+        try:
+            await check_feed()
+        except Exception as e:
+            logging.error(f"Error checking feed: {e}")
+        await asyncio.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    asyncio.run(run_loop())
+    asyncio.run(main())

@@ -1,66 +1,60 @@
 import os
-import logging
+import requests
 import feedparser
-import openai
-import httpx
 import pytz
 import datetime
+import logging
+from openai import OpenAI
 from telegram import Bot
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# Load environment variables
+# Environment variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+RSS_FEED_URL = os.getenv("RSS_FEED_URL")  # Example: https://nitter.net/FinancialJuice/rss
 
-# OpenAI client
-openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+# Setup OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Telegram Bot
+# Setup Telegram bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Feed URL
-FEED_URL = "https://www.financialjuice.com/home/rss"
+# For tracking posted tweets
+POSTED = set()
 
-# Track posted links
-posted_links = set()
-
-# Timezone
-TIMEZONE = pytz.timezone("Africa/Mogadishu")
-
-def translate_to_somali(text: str) -> str:
+def translate(text):
     try:
-        response = openai_client.chat.completions.create(
+        logging.info(f"Translating: {text[:60]}")
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a professional Somali financial news translator."},
-                {"role": "user", "content": f"Translate this to Somali clearly and accurately:\n\n{text}"}
-            ],
-            temperature=0.7,
+                {"role": "system", "content": "You translate financial news into Somali."},
+                {"role": "user", "content": f"Translate to Somali: {text}"}
+            ]
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logger.error(f"OpenAI translation error: {e}")
-        return "Translation failed."
+        logging.error(f"Translation error: {e}")
+        return None
 
-def fetch_and_translate():
-    try:
-        feed = feedparser.parse(FEED_URL)
-        for entry in feed.entries:
-            link = entry.link
-            title = entry.title
-            if link not in posted_links:
-                translated = translate_to_somali(title)
-                message = f"📰 {translated}\n🔗 {link}"
-                bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message)
-                posted_links.add(link)
-                logger.info(f"Posted: {title}")
-    except Exception as e:
-        logger.error(f"Error fetching or sending news: {e}")
+def fetch_and_post():
+    feed = feedparser.parse(RSS_FEED_URL)
+    for entry in feed.entries:
+        if entry.id in POSTED:
+            continue
+
+        translated = translate(entry.title)
+        if translated:
+            try:
+                bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=translated)
+                POSTED.add(entry.id)
+                logging.info(f"Posted: {translated}")
+            except Exception as e:
+                logging.error(f"Telegram error: {e}")
 
 if __name__ == "__main__":
-    logger.info("HagarlaaweNewsBot started.")
-    fetch_and_translate()
+    logging.info("Bot started...")
+    fetch_and_post()

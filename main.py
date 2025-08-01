@@ -1,60 +1,84 @@
-import os
-import requests
+import logging
 import feedparser
 import pytz
 import datetime
-import logging
-from openai import OpenAI
-from telegram import Bot
+import openai
+import requests
+import html
+import os
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes, JobQueue
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-
-# Environment variables
+# Set your tokens and keys here
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
-RSS_FEED_URL = os.getenv("RSS_FEED_URL")  # Example: https://nitter.net/FinancialJuice/rss
+CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001234567890")  # Replace with your channel ID
 
-# Setup OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Setup Telegram bot
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+openai.api_key = OPENAI_API_KEY
 
-# For tracking posted tweets
-POSTED = set()
+# List of RSS feeds
+RSS_FEEDS = [
+    "https://www.financialjuice.com/rss/news",
+    "https://www.forexlive.com/feed/news/",
+    "https://www.zerohedge.com/fullrss.xml"
+]
 
-def translate(text):
-    try:
-        logging.info(f"Translating: {text[:60]}")
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You translate financial news into Somali."},
-                {"role": "user", "content": f"Translate to Somali: {text}"}
-            ]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"Translation error: {e}")
-        return None
+# Function to fetch and summarize articles
+async def fetch_and_post_news(context: ContextTypes.DEFAULT_TYPE):
+    utc = pytz.UTC
+    now = datetime.datetime.now(utc)
+    one_hour_ago = now - datetime.timedelta(hours=1)
 
-def fetch_and_post():
-    feed = feedparser.parse(RSS_FEED_URL)
-    for entry in feed.entries:
-        if entry.id in POSTED:
-            continue
+    for url in RSS_FEEDS:
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            published = getattr(entry, 'published_parsed', None)
+            if not published:
+                continue
 
-        translated = translate(entry.title)
-        if translated:
+            published_dt = datetime.datetime(*published[:6], tzinfo=utc)
+            if published_dt < one_hour_ago:
+                continue
+
+            title = html.unescape(entry.title)
+            summary_input = f"Translate to Somali and summarize the news:\n\n{title}"
+            logger.info(f"Summarizing: {title}")
+
             try:
-                bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=translated)
-                POSTED.add(entry.id)
-                logging.info(f"Posted: {translated}")
+                completion = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful Somali news translator and summarizer."},
+                        {"role": "user", "content": summary_input}
+                    ],
+                    max_tokens=300
+                )
+
+                translated_summary = completion.choices[0].message.content.strip()
+                message = f"📰 {title}\n\n{translated_summary}"
+
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=message)
             except Exception as e:
-                logging.error(f"Telegram error: {e}")
+                logger.error(f"Error posting: {e}")
+
+# Start command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot is working and ready!")
+
+# Main function
+def main():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+
+    job_queue = application.job_queue
+    job_queue.run_repeating(fetch_and_post_news, interval=3600, first=10)
+
+    application.run_polling()
 
 if __name__ == "__main__":
-    logging.info("Bot started...")
-    fetch_and_post()
+    main()

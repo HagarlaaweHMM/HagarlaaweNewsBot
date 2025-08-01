@@ -1,24 +1,66 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
+import logging
+import feedparser
+import openai
+import httpx
+import pytz
+import datetime
+from telegram import Bot
 
+# Setup logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# Load environment variables
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not BOT_TOKEN:
-    raise ValueError("Missing BOT_TOKEN in environment variables")
+# OpenAI client
+openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm your bot. I'm working fine.")
+# Telegram Bot
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# Feed URL
+FEED_URL = "https://www.financialjuice.com/home/rss"
 
-    app.add_handler(CommandHandler("start", start))
+# Track posted links
+posted_links = set()
 
-    app.run_polling()
+# Timezone
+TIMEZONE = pytz.timezone("Africa/Mogadishu")
+
+def translate_to_somali(text: str) -> str:
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a professional Somali financial news translator."},
+                {"role": "user", "content": f"Translate this to Somali clearly and accurately:\n\n{text}"}
+            ],
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"OpenAI translation error: {e}")
+        return "Translation failed."
+
+def fetch_and_translate():
+    try:
+        feed = feedparser.parse(FEED_URL)
+        for entry in feed.entries:
+            link = entry.link
+            title = entry.title
+            if link not in posted_links:
+                translated = translate_to_somali(title)
+                message = f"📰 {translated}\n🔗 {link}"
+                bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message)
+                posted_links.add(link)
+                logger.info(f"Posted: {title}")
+    except Exception as e:
+        logger.error(f"Error fetching or sending news: {e}")
 
 if __name__ == "__main__":
-    main()
+    logger.info("HagarlaaweNewsBot started.")
+    fetch_and_translate()

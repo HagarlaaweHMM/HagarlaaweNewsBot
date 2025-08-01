@@ -2,13 +2,12 @@ import os
 import time
 import re
 import asyncio
-
 import feedparser
 import pytz
 import requests
 from telegram import Bot
 import openai
-import httpx # Import the httpx library
+import httpx
 
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -20,17 +19,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY environment variable not set. Please set it in Render Dashboard.")
 
-# --- EXPLICITLY INITIALIZE THE OPENAI CLIENT HERE ---
-try:
-    openai_client = openai.OpenAI(
-        api_key=OPENAI_API_KEY,
-        http_client=httpx.Client(proxies={})
-    )
-    print("OpenAI client initialized with explicit httpx.Client.")
-except Exception as e:
-    print(f"Error initializing explicit OpenAI client: {e}. Falling back to default client.")
-    openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
+# --- Initialize OpenAI Client for Async ---
+openai.api_key = OPENAI_API_KEY
 
 # --- Persistent Storage Configuration ---
 PERSISTENT_STORAGE_PATH = "/bot-data"
@@ -40,7 +30,7 @@ LAST_LINK_FILE = os.path.join(PERSISTENT_STORAGE_PATH, "last_posted_link.txt")
 last_posted_link = None
 
 # --- Keyword Filtering (NOW EMPTY - ALL HEADLINES WILL BE PROCESSED) ---
-KEYWORDS = [] 
+KEYWORDS = []
 
 # --- List of Somali prefixes to remove from translation ---
 SOMALI_PREFIXES_TO_REMOVE = [
@@ -88,7 +78,7 @@ def save_last_posted_link(link):
 # --- OpenAI Translation Function ---
 async def translate_text_with_gpt(text: str, target_language: str = "Somali") -> str:
     try:
-        response = await openai_client.chat.completions.create(
+        response = await openai.ChatCompletion.acreate(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": f"You are a highly accurate and professional translator. Translate the following English financial news text into {target_language}. Maintain the original meaning, tone, and format."},
@@ -97,18 +87,16 @@ async def translate_text_with_gpt(text: str, target_language: str = "Somali") ->
             temperature=0.3,
             max_tokens=1000
         )
-        translated_text = response.choices[0].message.content.strip()
+        translated_text = response.choices[0].message["content"].strip()
         return translated_text
     except openai.APIError as e:
         print(f"OpenAI API Error during translation: {e}")
         return f"Translation service currently unavailable due to API error. Original text: {text}"
     except Exception as e:
-        # We need to print the specific error to finally figure this out.
         print(f"An unexpected error occurred during translation: {type(e).__name__} - {e}")
         return f"Translation failed due to an internal error. Original text: {text}"
 
 # --- Main Bot Logic Functions ---
-
 async def fetch_and_post_headlines():
     global last_posted_link
 
@@ -162,7 +150,7 @@ async def fetch_and_post_headlines():
                 f"*{cleaned_english_headline}*\n\n"
                 f"{somali_headline}"
             )
-            
+
             await bot.send_message(
                 chat_id=TELEGRAM_CHANNEL_ID,
                 text=message_to_send,
@@ -203,13 +191,12 @@ async def fetch_and_post_headlines():
     if headlines_posted_count == 0 and len(new_entries_to_process) > 0:
         print("No new headlines were processed (this shouldn't happen if keyword filter is removed).")
 
-
 # --- Main Execution Loop ---
 if __name__ == "__main__":
     print("Bot starting...")
     os.makedirs(PERSISTENT_STORAGE_PATH, exist_ok=True)
     print(f"Persistent storage path ensured: {PERSISTENT_STORAGE_PATH}")
-    
+
     last_posted_link = load_last_posted_link()
 
     while True:
@@ -221,4 +208,3 @@ if __name__ == "__main__":
         current_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         print(f"[{current_time_str}] Sleeping for 1 minute before next check...")
         time.sleep(60)
-

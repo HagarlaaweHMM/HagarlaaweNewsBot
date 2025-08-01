@@ -14,7 +14,10 @@ logging.basicConfig(level=logging.INFO)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")  # Format: @channelusername
-RSS_FEED_URL = os.getenv("RSS_FEED_URL", "https://www.cnbc.com/id/100003114/device/rss/rss.html")
+
+# ✅ Hardcoded FinancialJuice RSS feed (replace with a working link if you have a different one)
+RSS_FEED_URL = "https://financialjuice.com/home/rss"
+
 LAST_TIMESTAMP_FILE = "last_processed.txt"
 
 openai.api_key = OPENAI_API_KEY
@@ -48,7 +51,7 @@ async def translate_to_somali(text):
 
 # Process RSS Feed
 async def process_feed():
-    logging.info("Checking RSS feed...")
+    logging.info(f"🔄 Checking RSS feed: {RSS_FEED_URL}")
     feed = feedparser.parse(RSS_FEED_URL)
     last_time = load_last_processed_time()
     new_last_time = last_time
@@ -63,7 +66,7 @@ async def process_feed():
 
             try:
                 await bot.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
-                logging.info(f"Sent: {title}")
+                logging.info(f"✅ Sent: {title}")
                 if published > new_last_time:
                     new_last_time = published
             except Exception as e:
